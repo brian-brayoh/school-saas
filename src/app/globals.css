@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #eef7f2;
+  --color-brand-100: #d6ecdf;
+  --color-brand-500: #1f8a5b;
+  --color-brand-600: #187049;
+  --color-brand-700: #13583a;
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+
+  /* Marketing site: the carbon-copy receipt book */
+  --color-paper: #fbfbf8;
+  --color-carbon: #23308a;
+  --color-carbon-deep: #19226a;
+  --color-dup: #f4d3dc;
+  --color-trip: #f5e6a3;
+  --color-margin: #b0283f;
+  --color-ink: #16182b;
+  --font-display: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-hand: "Kalam", "Segoe Print", cursive;
+}
+
+body {
+  @apply bg-stone-50 text-stone-900 antialiased;
+}

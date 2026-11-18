@@ -1,0 +1,632 @@
+// School Management SaaS — v1 schema (fees-first)
+// Multi-tenant: shared schema, tenantId on EVERY school-owned table
+// (child tables included). prisma/rls.sql turns on row-level security
+// for every table that has a "tenantId" column — run `npm run db:rls`
+// after every migration (db:setup and db:deploy already do).
+// All money is stored as integer cents (BigInt).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────── Enums ───────────────────────────
+
+enum InstitutionKind {
+  SCHOOL // pre-primary to junior/senior school
+  TVET // technical & vocational colleges, polytechnics
+  UNIVERSITY
+}
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  BURSAR
+  TEACHER
+  VIEWER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum Residence {
+  DAY
+  BOARDING
+}
+
+enum StudentStatus {
+  ACTIVE
+  TRANSFERRED
+  GRADUATED
+  LEFT
+}
+
+enum InvoiceStatus {
+  OPEN
+  PARTIAL
+  PAID
+  VOID
+}
+
+enum AdjustmentType {
+  BURSARY
+  DISCOUNT
+  WAIVER
+  DEBIT
+}
+
+enum ChannelType {
+  PAYBILL
+  TILL
+  BANK
+  CASH
+}
+
+enum MatchStatus {
+  MATCHED
+  SUGGESTED
+  UNMATCHED
+  IGNORED
+}
+
+enum SmsStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+}
+
+// ─────────────────────── Platform & identity ───────────────────────
+
+model Tenant {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique // subdomain
+  county    String?
+  phone     String?
+  email     String?
+  address   String? // printed on receipts/statements, e.g. "P.O. Box 123-10200, Murang'a"
+  motto     String?
+  status    TenantStatus @default(TRIAL)
+  kind      InstitutionKind @default(SCHOOL) // drives labels: Class/Course/Programme, Term/Semester…
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  subscription    Subscription?
+  memberships     Membership[]
+  academicYears   AcademicYear[]
+  terms           Term[]
+  classes         Class[]
+  streams         Stream[]
+  students        Student[]
+  enrollments     Enrollment[]
+  guardians       Guardian[]
+  studentGuardians StudentGuardian[]
+  feeItems        FeeItem[]
+  feeStructures   FeeStructure[]
+  feeStructureLines FeeStructureLine[]
+  invoices        Invoice[]
+  invoiceLines    InvoiceLine[]
+  allocations     Allocation[]
+  adjustments     Adjustment[]
+  channels        PaymentChannel[]
+  payments        Payment[]
+  billRefAliases  BillRefAlias[]
+  studentCredits  StudentCredit[]
+  receipts        Receipt[]
+  smsTemplates    SmsTemplate[]
+  smsMessages     SmsMessage[]
+  smsCreditLedger SmsCreditLedger[]
+  auditLogs       AuditLog[]
+  counters        Counter[]
+  branding        TenantBranding?
+}
+
+// Seal/crest and logo, kept apart from Tenant so the images aren't loaded on every request.
+// Served by /api/branding/<slug>/<seal|logo>.
+model TenantBranding {
+  tenantId  String   @id
+  seal      Bytes?
+  sealMime  String?
+  logo      Bytes?
+  logoMime  String?
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// Per-school running numbers (invoice and receipt numbers).
+// Incremented atomically by nextNumbers() in src/lib/fees.ts.
+model Counter {
+  id       String @id @default(cuid())
+  tenantId String
+  key      String // e.g. "invoice:2027"
+  value    Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key])
+}
+
+model Subscription {
+  id                    String   @id @default(cuid())
+  tenantId              String   @unique
+  plan                  String
+  pricePerStudentCents  BigInt
+  currentPeriodEnd      DateTime
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+}
+
+model User {
+  id              String   @id @default(cuid())
+  name            String
+  phone           String?  @unique
+  email           String?  @unique
+  passwordHash    String
+  isPlatformAdmin Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  memberships         Membership[]
+  approvedAdjustments Adjustment[] @relation("AdjustmentApprover")
+  auditLogs           AuditLog[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
+}
+
+// ─────────────────────── Academic structure ───────────────────────
+
+model AcademicYear {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String // e.g. "2027"
+  startsOn  DateTime @db.Date
+  endsOn    DateTime @db.Date
+  isCurrent Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  terms  Term[]
+
+  @@unique([tenantId, name])
+}
+
+model Term {
+  id             String   @id @default(cuid())
+  tenantId       String
+  academicYearId String
+  number         Int // 1–3
+  startsOn       DateTime @db.Date
+  endsOn         DateTime @db.Date
+  isCurrent      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  academicYear  AcademicYear   @relation(fields: [academicYearId], references: [id])
+  enrollments   Enrollment[]
+  feeStructures FeeStructure[]
+  invoices      Invoice[]
+
+  @@unique([tenantId, academicYearId, number])
+}
+
+model Class {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String // e.g. "Grade 4", "PP2"
+  sortOrder Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  streams       Stream[]
+  feeStructures FeeStructure[]
+
+  @@unique([tenantId, name])
+}
+
+model Stream {
+  id        String   @id @default(cuid())
+  tenantId  String
+  classId   String
+  name      String // e.g. "East"; single-stream schools get "Main"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  class       Class        @relation(fields: [classId], references: [id])
+  enrollments Enrollment[]
+
+  @@unique([tenantId, classId, name])
+}
+
+// ─────────────────────── Students & guardians ───────────────────────
+
+model Student {
+  id          String        @id @default(cuid())
+  tenantId    String
+  admissionNo String // also the M-Pesa account number
+  firstName   String
+  lastName    String
+  gender      Gender?
+  dateOfBirth DateTime?     @db.Date
+  residence   Residence     @default(DAY)
+  status      StudentStatus @default(ACTIVE)
+  upi         String? // optional national learner ID
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  enrollments    Enrollment[]
+  guardians      StudentGuardian[]
+  invoices       Invoice[]
+  adjustments    Adjustment[]
+  payments       Payment[]
+  billRefAliases BillRefAlias[]
+  credits        StudentCredit[]
+
+  @@unique([tenantId, admissionNo])
+  @@index([tenantId, lastName])
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  tenantId  String
+  studentId String
+  termId    String
+  streamId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  student Student @relation(fields: [studentId], references: [id])
+  term    Term    @relation(fields: [termId], references: [id])
+  stream  Stream  @relation(fields: [streamId], references: [id])
+
+  @@unique([studentId, termId])
+  @@index([tenantId, termId, streamId])
+}
+
+model Guardian {
+  id           String   @id @default(cuid())
+  tenantId     String
+  name         String
+  phone        String // 2547XXXXXXXX
+  altPhone     String?
+  relationship String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  students StudentGuardian[]
+
+  @@index([tenantId, phone])
+}
+
+model StudentGuardian {
+  tenantId    String
+  studentId   String
+  guardianId  String
+  isPrimary   Boolean @default(false)
+  receivesSms Boolean @default(true)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  guardian Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, guardianId])
+}
+
+// ─────────────────────────── Fees ───────────────────────────
+
+model FeeItem {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String // Tuition, Lunch, Transport…
+  isOptional Boolean  @default(false)
+  priority   Int      @default(100) // lower = paid first (future allocation)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  structureLines FeeStructureLine[]
+  invoiceLines   InvoiceLine[]
+
+  @@unique([tenantId, name])
+}
+
+model FeeStructure {
+  id        String    @id @default(cuid())
+  tenantId  String
+  termId    String
+  classId   String
+  residence Residence
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id])
+  term   Term               @relation(fields: [termId], references: [id])
+  class  Class              @relation(fields: [classId], references: [id])
+  lines  FeeStructureLine[]
+
+  @@unique([tenantId, termId, classId, residence])
+}
+
+model FeeStructureLine {
+  id             String @id @default(cuid())
+  tenantId       String
+  feeStructureId String
+  feeItemId      String
+  amountCents    BigInt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  feeStructure FeeStructure @relation(fields: [feeStructureId], references: [id], onDelete: Cascade)
+  feeItem      FeeItem      @relation(fields: [feeItemId], references: [id])
+
+  @@unique([feeStructureId, feeItemId])
+}
+
+model Invoice {
+  id         String        @id @default(cuid())
+  tenantId   String
+  studentId  String
+  termId     String
+  number     String
+  totalCents BigInt
+  paidCents  BigInt        @default(0)
+  status     InvoiceStatus @default(OPEN)
+  issuedAt   DateTime      @default(now())
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id])
+  student     Student       @relation(fields: [studentId], references: [id])
+  term        Term          @relation(fields: [termId], references: [id])
+  lines       InvoiceLine[]
+  allocations Allocation[]
+  adjustments Adjustment[]
+
+  @@unique([tenantId, number])
+  @@unique([studentId, termId]) // one termly invoice per student; extras are DEBIT adjustments
+  @@index([tenantId, termId, status])
+  @@index([tenantId, studentId, status])
+}
+
+model InvoiceLine {
+  id          String @id @default(cuid())
+  tenantId    String
+  invoiceId   String
+  feeItemId   String
+  description String
+  amountCents BigInt // copied at issue time; never recomputed
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  feeItem FeeItem @relation(fields: [feeItemId], references: [id])
+}
+
+model Adjustment {
+  id           String         @id @default(cuid())
+  tenantId     String
+  studentId    String
+  invoiceId    String?
+  type         AdjustmentType
+  amountCents  BigInt
+  reason       String
+  approvedById String
+  createdAt    DateTime       @default(now())
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  student    Student  @relation(fields: [studentId], references: [id])
+  invoice    Invoice? @relation(fields: [invoiceId], references: [id])
+  approvedBy User     @relation("AdjustmentApprover", fields: [approvedById], references: [id])
+}
+
+// ─────────────────────────── Payments ───────────────────────────
+
+model PaymentChannel {
+  id             String      @id @default(cuid())
+  tenantId       String
+  type           ChannelType
+  shortcode      String?
+  credentialsEnc String? // encrypted Daraja consumer key/secret, passkey
+  callbackToken  String      @unique // secret in the callback URL path
+  environment    String      @default("sandbox") // "sandbox" | "production" (Daraja)
+  registeredAt   DateTime? // last successful C2B URL registration
+  lastCallbackAt DateTime? // last payment notification received
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  payments Payment[]
+
+  @@unique([tenantId, type, shortcode])
+}
+
+model Payment {
+  id                String      @id @default(cuid())
+  tenantId          String
+  channelId         String
+  reference         String // M-Pesa receipt / bank ref / cash receipt
+  amountCents       BigInt // negative for reversals
+  payerName         String?
+  payerPhone        String? // may be masked/hashed by Daraja
+  billRef           String? // account number exactly as typed
+  paidAt            DateTime
+  rawPayload        Json?
+  matchStatus       MatchStatus @default(UNMATCHED)
+  studentId         String?
+  reversedPaymentId String?     @unique
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  channel         PaymentChannel  @relation(fields: [channelId], references: [id])
+  student         Student?        @relation(fields: [studentId], references: [id])
+  reversedPayment Payment?        @relation("Reversal", fields: [reversedPaymentId], references: [id])
+  reversal        Payment?        @relation("Reversal")
+  allocations     Allocation[]
+  credits         StudentCredit[]
+  receipt         Receipt?
+
+  @@unique([channelId, reference]) // idempotency against repeated callbacks
+  @@index([tenantId, matchStatus])
+  @@index([tenantId, paidAt])
+}
+
+// Learned mapping from a typed account reference to a student,
+// saved whenever the bursar confirms a suggested match.
+model BillRefAlias {
+  id         String   @id @default(cuid())
+  tenantId   String
+  normalized String
+  studentId  String
+  createdAt  DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  student Student @relation(fields: [studentId], references: [id])
+
+  @@unique([tenantId, normalized])
+}
+
+model Allocation {
+  id          String   @id @default(cuid())
+  tenantId    String
+  paymentId   String
+  invoiceId   String
+  amountCents BigInt
+  createdAt   DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  payment Payment @relation(fields: [paymentId], references: [id])
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+}
+
+model StudentCredit {
+  id              String    @id @default(cuid())
+  tenantId        String
+  studentId       String
+  amountCents     BigInt
+  sourcePaymentId String
+  appliedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
+  student       Student @relation(fields: [studentId], references: [id])
+  sourcePayment Payment @relation(fields: [sourcePaymentId], references: [id])
+
+  @@index([tenantId, studentId, appliedAt])
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  tenantId  String
+  paymentId String   @unique
+  number    String // e.g. RCT-2027-000123
+  issuedAt  DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@unique([tenantId, number])
+}
+
+// ─────────────────────── Messaging & audit ───────────────────────
+
+model SmsTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String // payment_received, invoice_issued, balance_reminder…
+  body      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key])
+}
+
+model SmsMessage {
+  id                String    @id @default(cuid())
+  tenantId          String
+  toPhone           String
+  body              String
+  segments          Int       @default(1)
+  status            SmsStatus @default(QUEUED)
+  providerMessageId String?
+  costCents         BigInt    @default(0)
+  relatedType       String? // "Payment", "Invoice", "Announcement"
+  relatedId         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, relatedType, relatedId])
+}
+
+model SmsCreditLedger {
+  id           String   @id @default(cuid())
+  tenantId     String
+  delta        Int // +topup / -send, in SMS units
+  reason       String
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  actorUserId String?
+  action      String
+  entity      String
+  entityId    String
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  actor  User?  @relation(fields: [actorUserId], references: [id])
+
+  @@index([tenantId, entity, entityId])
+}

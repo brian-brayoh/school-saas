@@ -1,0 +1,36 @@
+/* Marketing site only. Tokens live in globals.css (@theme). */
+
+.site :focus-visible {
+  outline: 3px solid var(--color-carbon);
+  outline-offset: 3px;
+}
+
+/* Ruled counter-book paper with a red margin line */
+.ruled {
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, transparent 2.75rem, color-mix(in srgb, var(--color-margin) 55%, transparent) 2.75rem, color-mix(in srgb, var(--color-margin) 55%, transparent) calc(2.75rem + 1.5px), transparent calc(2.75rem + 1.5px)),
+    repeating-linear-gradient(to bottom, transparent 0, transparent calc(2rem - 1px), #c9d3ea calc(2rem - 1px), #c9d3ea 2rem);
+  background-position: 0 0.4rem;
+}
+
+/* The one moment of motion: payments arriving in the hero */
+.ledger-row {
+  transition: opacity 500ms ease, transform 500ms cubic-bezier(.2, .8, .2, 1);
+}
+.ledger-row[data-in="false"] {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.stamp {
+  transition: opacity 250ms ease 350ms, transform 350ms cubic-bezier(.3, 1.6, .5, 1) 350ms;
+  transform: rotate(-8deg) scale(1);
+}
+.ledger-row[data-in="false"] .stamp {
+  opacity: 0;
+  transform: rotate(-8deg) scale(1.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger-row, .stamp { transition: none; }
+}
