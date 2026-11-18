@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "School back office",
+  title: { default: "Ada", template: "%s | Ada" },
   description: "Fees, students and parent communication for Kenyan schools",
 };
 

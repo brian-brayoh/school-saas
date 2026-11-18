@@ -11,6 +11,7 @@
     "db:rls": "prisma db execute --file prisma/rls.sql --schema prisma/schema.prisma",
     "db:seed": "tsx prisma/seed.ts",
     "db:demo": "tsx prisma/demo-data.ts",
+    "db:demo:full": "tsx prisma/demo-data.ts --activity",
     "db:setup": "prisma migrate dev --name init && npm run db:rls && npm run db:seed",
     "db:deploy": "prisma migrate deploy && npm run db:rls",
     "db:prod-setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-production.ps1",

@@ -1,8 +1,14 @@
-import { requireSchool, can, MANAGE_ROLES, FINANCE_ROLES } from "@/lib/school";
+import type { Metadata } from "next";
+import { requireSchool, can, MANAGE_ROLES, FINANCE_ROLES, currentTenant } from "@/lib/school";
 import { LogoutButton } from "@/components/LogoutButton";
 import { NavLink } from "./NavLink";
 import { withTenant } from "@/lib/db";
 import { brandingUrls } from "@/lib/branding";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const tenant = await currentTenant();
+  return { title: { default: tenant?.name ?? "Ada", template: `%s | ${tenant?.name ?? "Ada"}` } };
+}
 
 export default async function SchoolLayout({ children }: { children: React.ReactNode }) {
   const { tenant, user, role, labels } = await requireSchool();

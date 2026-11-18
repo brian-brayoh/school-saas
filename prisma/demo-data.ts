@@ -12,9 +12,19 @@
  * Invoices are NOT created: run Fees → Invoicing yourself.
  *
  * Idempotent: running it again adds nothing new.
+ *
+ *   npm run db:demo -- --activity
+ * also fills the term with activity: invoices for everyone with a structure,
+ * about three weeks of M-Pesa/cash/bank payments (some full, some partial, some
+ * none), a few bursaries, and three M-Pesa payments waiting to be matched.
+ * Skipped if the demo school already has payments.
  * Phone numbers are made up (2547 00 xxx xxx). Don't send real SMS to them.
  */
-import { prisma, withSystem } from "../src/lib/db";
+import { randomBytes } from "node:crypto";
+import { prisma, withSystem, type Tx } from "../src/lib/db";
+import { generateInvoices, refreshInvoiceStatus } from "../src/lib/fees";
+import { allocatePayment, issueReceipt, manualChannel } from "../src/lib/payments";
+import { settleIncoming } from "../src/lib/c2b";
 
 const FIRST = {
   F: ["Wanjiku", "Achieng", "Njeri", "Akinyi", "Wambui", "Chebet", "Mwende", "Nyambura", "Atieno", "Wairimu", "Jepkosgei", "Kemunto", "Zawadi", "Makena", "Imani", "Neema", "Faith", "Mercy", "Grace", "Esther"],
@@ -188,6 +198,123 @@ async function main() {
     `Demo data: +${summary.students} students (${summary.families} families), +${summary.structures} fee structures.\n` +
       `Grade 9 has ${summary.boarders9} boarder(s) with no boarding structure on purpose: Invoicing will flag them.\n` +
       `Next: sign in at http://demo.localhost:3000 → Fees → Invoicing.`,
+  );
+
+  if (process.argv.includes("--activity")) await addActivity(tenant.id);
+}
+
+const simRef = () => "SIM" + Array.from(randomBytes(7), (b) => "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789"[b % 34]).join("");
+
+async function simulatorChannel(tx: Tx, tenantId: string) {
+  return (
+    (await tx.paymentChannel.findFirst({ where: { type: "PAYBILL", shortcode: "simulator" } })) ??
+    tx.paymentChannel.create({ data: { tenantId, type: "PAYBILL", shortcode: "simulator", callbackToken: randomBytes(24).toString("hex") } })
+  );
+}
+
+/** A term already under way: invoices, payments, bursaries and a short matching queue. */
+async function addActivity(tenantId: string) {
+  const result = await withSystem(
+    async (tx) => {
+      if ((await tx.payment.count({ where: { tenantId } })) > 0) return null;
+      const term = await tx.term.findFirstOrThrow({ where: { tenantId, isCurrent: true } });
+      const owner = await tx.membership.findFirstOrThrow({ where: { tenantId, role: "OWNER" } });
+
+      const inv = await generateInvoices(tx, tenantId, term.id);
+      const invoices = await tx.invoice.findMany({
+        where: { tenantId, termId: term.id },
+        include: { student: { include: { guardians: { where: { isPrimary: true }, include: { guardian: true } } } } },
+        orderBy: { number: "asc" },
+      });
+
+      // Bursaries for a handful of students.
+      let bursaries = 0;
+      for (const i of invoices.filter((_, n) => n % 19 === 4).slice(0, 6)) {
+        const amount = BigInt(5000 + Math.floor(rand() * 6) * 1000) * 100n;
+        await tx.adjustment.create({
+          data: { tenantId, studentId: i.studentId, invoiceId: i.id, type: "BURSARY", amountCents: amount < i.totalCents ? amount : i.totalCents / 2n, reason: rand() < 0.5 ? "CDF bursary 2027" : "County bursary, Term 1", approvedById: owner.userId },
+        });
+        await refreshInvoiceStatus(tx, i.id);
+        bursaries++;
+      }
+
+      const sim = await simulatorChannel(tx, tenantId);
+      const cash = await manualChannel(tx, tenantId, "CASH");
+      const bank = await manualChannel(tx, tenantId, "BANK");
+      let payments = 0;
+      let collected = 0n;
+
+      for (const i of invoices) {
+        const r = rand();
+        if (r < 0.3) continue; // hasn't paid yet
+        const fresh = await tx.invoice.findUniqueOrThrow({ where: { id: i.id }, include: { adjustments: true } });
+        const owed = fresh.totalCents - fresh.adjustments.reduce((t, a) => t + (a.type === "DEBIT" ? -a.amountCents : a.amountCents), 0n);
+        if (owed <= 0n) continue;
+        // Full payment, or a round partial amount.
+        let amount = r < 0.65 ? owed : (owed * BigInt(30 + Math.floor(rand() * 50))) / 100n;
+        amount = amount === owed ? owed : (amount / 50000n) * 50000n || 100000n; // round to KES 500
+        const daysAgo = Math.floor(rand() * 21);
+        const paidAt = new Date(Date.now() - daysAgo * 86_400_000 - Math.floor(rand() * 8) * 3_600_000);
+        const m = rand();
+        const channel = m < 0.72 ? sim : m < 0.9 ? cash : bank;
+        const g = i.student.guardians[0]?.guardian;
+        const p = await tx.payment.create({
+          data: {
+            tenantId,
+            channelId: channel.id,
+            reference: channel.id === sim.id ? simRef() : channel.id === cash.id ? `CASH-${simRef().slice(3)}` : `EQ${Math.floor(10_000_000 + rand() * 89_999_999)}`,
+            amountCents: amount,
+            payerName: g?.name.toUpperCase() ?? null,
+            billRef: i.student.admissionNo,
+            paidAt,
+            matchStatus: "MATCHED",
+            studentId: i.studentId,
+            rawPayload: { source: "demo-data" },
+          },
+        });
+        await allocatePayment(tx, tenantId, { id: p.id, studentId: i.studentId, amountCents: amount });
+        await issueReceipt(tx, tenantId, p.id, paidAt);
+        payments++;
+        collected += amount;
+      }
+
+      // Three M-Pesa payments for the matching queue.
+      const first = invoices[0]?.student;
+      const queue = [
+        { billRef: first ? first.admissionNo.replace(/^D0/, "D") : "D001", name: "JANE WANJIKU", amount: 5000 },
+        { billRef: first ? `${first.firstName} fees` : "wanjiku fees", name: "PETER KAMAU", amount: 7500 },
+        { billRef: "XYZ123", name: "UNKNOWN PAYER", amount: 2000 },
+      ];
+      for (const q of queue) {
+        const p = await tx.payment.create({
+          data: {
+            tenantId,
+            channelId: sim.id,
+            reference: simRef(),
+            amountCents: BigInt(q.amount) * 100n,
+            payerName: q.name,
+            payerPhone: "2547XXXXX" + Math.floor(100 + rand() * 899),
+            billRef: q.billRef,
+            paidAt: new Date(Date.now() - Math.floor(rand() * 3) * 86_400_000),
+            matchStatus: "UNMATCHED",
+            rawPayload: { source: "demo-data" },
+          },
+        });
+        await settleIncoming(tx, tenantId, p.id);
+      }
+
+      return { invoiced: inv.created, payments, collected, bursaries };
+    },
+    { timeout: 600_000 },
+  );
+
+  if (!result) {
+    console.log("Activity skipped: the demo school already has payments.");
+    return;
+  }
+  console.log(
+    `Activity: ${result.invoiced} invoices, ${result.payments} payments (KES ${(result.collected / 100n).toLocaleString("en-KE")}), ` +
+      `${result.bursaries} bursaries, 3 M-Pesa payments waiting in Payments → match.`,
   );
 }
 

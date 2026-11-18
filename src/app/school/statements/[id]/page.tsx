@@ -7,7 +7,9 @@ import { ADJUSTMENT_LABELS, signedAdjustment } from "@/lib/fees";
 import { methodOf } from "@/lib/payments";
 import { formatKePhone } from "@/lib/phone";
 import { PSEUDO_SHORTCODES } from "@/lib/c2b";
+import type { Metadata } from "next";
 import { PrintButton } from "./PrintButton";
+import { currentTenant } from "@/lib/school";
 import { InstitutionHeader } from "@/components/InstitutionHeader";
 import { brandingUrls } from "@/lib/branding";
 
@@ -18,6 +20,14 @@ type Entry = { date: Date; ref: string; text: string; detail?: string; debit: bi
  * extra charges and payments in date order. Closing balance = billed - paid,
  * so overpayments show as credit.
  */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const tenant = await currentTenant();
+  if (!tenant) return { title: "Fee statement" };
+  const { id } = await params;
+  const s = await withTenant(tenant.id, (tx) => tx.student.findUnique({ where: { id }, select: { firstName: true, lastName: true, admissionNo: true } }));
+  return { title: { absolute: s ? `Fee statement ${s.admissionNo} ${s.firstName} ${s.lastName} - ${tenant.name}` : `Fee statement - ${tenant.name}` } };
+}
+
 export default async function StatementPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ year?: string }> }) {
   const { tenant, labels: L } = await requireSchool();
   const { id } = await params;
@@ -96,7 +106,7 @@ export default async function StatementPage({ params, searchParams }: { params: 
 
   return (
     <div className="min-h-screen bg-stone-100 py-8 print:bg-white print:py-0">
-      <style>{`@page { size: A4; margin: 14mm; } @media print { .no-print { display: none !important; } tr { break-inside: avoid; } }`}</style>
+      <style>{`@page { size: A4; margin: 14mm; } @media print { .no-print { display: none !important; } html, body { background: #fff; } tr { break-inside: avoid; } }`}</style>
 
       <div className="no-print mx-auto mb-4 flex max-w-[210mm] flex-wrap items-center justify-between gap-3 px-2">
         <Link href={`/students/${s.id}`} className="text-sm text-brand-700 hover:underline">← Back</Link>
