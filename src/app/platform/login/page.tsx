@@ -4,5 +4,5 @@ import { currentHost } from "@/lib/school";
 
 export default async function PlatformLogin() {
   if ((await currentHost()).area !== "admin") notFound();
-  return <LoginForm title="Platform admin" subtitle="Manage schools on the platform" redirectTo="/tenants" />;
+  return <LoginForm title="Platform admin" subtitle="Manage schools on the platform" redirectTo="/tenants" forgotHelp="Another platform admin can reset it. If you are the only one, reset it with the seed script (see README)." />;
 }

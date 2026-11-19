@@ -9,6 +9,7 @@ import { requireSchool, MANAGE_ROLES } from "@/lib/school";
 import { normalizeKePhone } from "@/lib/phone";
 import { audit } from "@/lib/audit";
 import { friendlyDbError } from "@/lib/errors";
+import { generateTempPassword, setPassword } from "@/lib/passwords";
 import type { FormState } from "@/components/ActionForm";
 
 const ROLES = ["OWNER", "ADMIN", "BURSAR", "TEACHER", "VIEWER"] as const;
@@ -47,7 +48,7 @@ export async function addMember(_p: FormState, fd: FormData): Promise<FormState>
       let created = false;
       if (!user) {
         if (!d.password || d.password.length < 8) throw new Error("PASSWORD");
-        user = await tx.user.create({ data: { name: d.name, email, phone, passwordHash: await bcrypt.hash(d.password, 10) } });
+        user = await tx.user.create({ data: { name: d.name, email, phone, passwordHash: await bcrypt.hash(d.password, 10), mustChangePassword: true } });
         created = true;
       }
       const m = await tx.membership.create({ data: { tenantId: tenant.id, userId: user.id, role: d.role } });
@@ -99,4 +100,25 @@ export async function removeMember(fd: FormData) {
     await audit(tx, { tenantId: tenant.id, actorUserId: actor.id, action: "member.remove", entity: "Membership", entityId: id, before: { role: m.role, userId: m.userId } });
   });
   revalidatePath("/users");
+}
+
+/** Owner/admin resets a staff member's password to a one-time temporary one. */
+export async function resetMemberPassword(_p: FormState, fd: FormData): Promise<FormState> {
+  const { tenant, user: actor, role: actorRole } = await requireSchool(MANAGE_ROLES);
+  const id = String(fd.get("membershipId") ?? "");
+  try {
+    const out = await withTenant(tenant.id, async (tx) => {
+      const m = await tx.membership.findUniqueOrThrow({ where: { id }, include: { user: true } });
+      if (m.userId === actor.id) throw new Error("Change your own password under My account");
+      if (m.role === "OWNER") assertCanGrant(actorRole, "OWNER");
+      if (m.user.isPlatformAdmin) throw new Error("This account can only be reset by the platform");
+      const temp = generateTempPassword();
+      await setPassword(tx, m.userId, temp, { mustChange: true });
+      await audit(tx, { tenantId: tenant.id, actorUserId: actor.id, action: "user.password.reset", entity: "User", entityId: m.userId });
+      return { name: m.user.name, temp };
+    });
+    return { ok: `Temporary password for ${out.name}: ${out.temp}  Give it to them in person or by phone. They'll choose their own when they sign in, and any device they're signed in on is signed out now.` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
 }

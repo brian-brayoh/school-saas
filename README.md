@@ -20,6 +20,7 @@ Multi-tenant school back office. One deployment serves every school, each on its
 - **Printable receipts:** every payment (cash, bank, sponsor, M-Pesa) has an A5 receipt with the amount in words, what it paid, the balance now, and who received it. Open it from **Print receipt** after recording a payment, or from any receipt number.
 - **Printable fee statements:** **Print statement** on any student gives an A4 statement with a running balance (invoices, bursaries, extra charges, payments and reversals). It can be limited to one year with the balance brought forward, and shows the paybill and account number when there's something to pay.
 - **Letterhead and branding:** each institution has an address, contacts, motto, a seal/crest and a logo (PNG/JPG/WebP, under 500 KB, stored in the database). Receipts and statements print seal left, details centred, logo right. Set during platform onboarding, at Institutions → Edit profile & logo, or by the school under **Profile & logo**. The seal also shows on the school's sign-in page, sidebar and the platform list. The demo school is seeded with a sample crest and the Ada mark (`prisma/demo-assets`).
+- **Passwords:** everyone can change their password under **My account**. New staff and new owners get a temporary password and must choose their own at first sign-in. An owner or admin resets staff passwords under **Staff & access**, and the platform admin resets an owner's from Institutions → Edit. A change or reset signs that person out of every other device. Locked-out platform admin: run `db:seed` with `SEED_PLATFORM_ADMIN_EMAIL`, `SEED_PLATFORM_ADMIN_PASSWORD` and `SEED_RESET_ADMIN_PASSWORD=true` set against the database.
 - **Landing page** at the root domain. The product's working name is "Ada" (Swahili for fees); change it in `src/lib/brand.ts`. Logo files: `public/brand/` (`ada-mark.svg`, `ada-mark.png`, `ada-logo.png`), and the favicon is `src/app/icon.svg`.
 
 **Next:** M-Pesa statement upload (backfill missed notifications), then SMS to parents.
@@ -187,5 +188,3 @@ src/
   lib/phone.ts         Kenyan phone normalisation (2547…/2541…)
   app/site | app/platform | app/school
 ```
-#   s c h o o l - s a a s  
- 

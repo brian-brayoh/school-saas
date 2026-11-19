@@ -1,4 +1,5 @@
 import { prisma, withSystem } from "@/lib/db";
+import { requirePlatformAdmin } from "@/lib/school";
 import { rootDomain, schoolUrl } from "@/lib/host";
 import { Card, PageHeader, btnSecondaryCls } from "@/components/ui";
 import { CreateTenantForm } from "./CreateTenantForm";
@@ -7,6 +8,7 @@ import { KIND_NAMES } from "@/lib/terms";
 import { inputCls } from "@/components/ui";
 
 export default async function TenantsPage() {
+  await requirePlatformAdmin();
   const tenants = await prisma.tenant.findMany({ orderBy: { createdAt: "desc" } });
   const studentCounts = await withSystem((tx) =>
     tx.student.groupBy({ by: ["tenantId"], where: { status: "ACTIVE" }, _count: { _all: true } }),

@@ -11,7 +11,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function SchoolLayout({ children }: { children: React.ReactNode }) {
-  const { tenant, user, role, labels } = await requireSchool();
+  const { tenant, user, role, labels } = await requireSchool(undefined, { allowPasswordChange: true });
   const manage = can(role, MANAGE_ROLES);
   const brand = await withTenant(tenant.id, (tx) => brandingUrls(tx, tenant));
   const badge = brand.sealUrl ?? brand.logoUrl;
@@ -38,7 +38,7 @@ export default async function SchoolLayout({ children }: { children: React.React
           {manage && <NavLink href="/settings/profile">Profile &amp; logo</NavLink>}
         </nav>
         <div className="border-t border-stone-200 p-4 text-sm">
-          <div className="font-medium">{user.name}</div>
+          <a href="/account" className="font-medium hover:text-brand-700 hover:underline">{user.name}</a>
           <div className="text-xs text-stone-500">{role.toLowerCase()}</div>
           <LogoutButton className="mt-2 text-brand-700 hover:underline" />
         </div>

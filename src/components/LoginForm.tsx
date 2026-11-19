@@ -10,8 +10,10 @@ export function LoginForm({
   notice,
   redirectTo = "/dashboard",
   imageUrl,
+  forgotHelp,
 }: {
   imageUrl?: string | null;
+  forgotHelp?: string;
   title: string;
   subtitle?: string;
   notice?: string;
@@ -46,6 +48,12 @@ export function LoginForm({
             {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
+        {forgotHelp && (
+          <details className="mt-4 text-center text-sm text-stone-600">
+            <summary className="cursor-pointer text-brand-700 hover:underline">Forgot your password?</summary>
+            <p className="mx-auto mt-2 max-w-xs">{forgotHelp}</p>
+          </details>
+        )}
       </div>
     </main>
   );

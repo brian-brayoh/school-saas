@@ -3,7 +3,7 @@
 import { startTransition, useActionState, type FormEvent, type ReactNode } from "react";
 import { btnCls, Notice } from "@/components/ui";
 
-export type FormState = { error?: string; ok?: string; link?: { href: string; label: string } } | null;
+export type FormState = { error?: string; ok?: string; link?: { href: string; label: string; sameTab?: boolean } } | null;
 
 /**
  * Form bound to a server action that returns { error } or { ok }.
@@ -47,7 +47,7 @@ export function ActionForm({
             {state.link && (
               <>
                 {" "}
-                <a href={state.link.href} target="_blank" rel="noopener" className="font-semibold underline">{state.link.label}</a>
+                <a href={state.link.href} {...(state.link.sameTab ? {} : { target: "_blank", rel: "noopener" })} className="font-semibold underline">{state.link.label}</a>
               </>
             )}
           </Notice>

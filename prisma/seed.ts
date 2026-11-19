@@ -14,9 +14,14 @@ async function main() {
   const adminEmail = (process.env.SEED_PLATFORM_ADMIN_EMAIL ?? "admin@example.com").toLowerCase();
   const adminPassword = process.env.SEED_PLATFORM_ADMIN_PASSWORD ?? "ChangeMe123!";
 
+  // SEED_RESET_ADMIN_PASSWORD=true: recovery for a locked-out platform admin.
+  const resetAdmin = process.env.SEED_RESET_ADMIN_PASSWORD === "true";
   await prisma.user.upsert({
     where: { email: adminEmail },
-    update: { isPlatformAdmin: true },
+    update: {
+      isPlatformAdmin: true,
+      ...(resetAdmin && { passwordHash: await bcrypt.hash(adminPassword, 10), mustChangePassword: false, sessionVersion: { increment: 1 } }),
+    },
     create: { name: "Platform Admin", email: adminEmail, isPlatformAdmin: true, passwordHash: await bcrypt.hash(adminPassword, 10) },
   });
 

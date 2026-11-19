@@ -3,7 +3,8 @@ import { requireSchool, MANAGE_ROLES } from "@/lib/school";
 import { formatKePhone } from "@/lib/phone";
 import { ActionForm } from "@/components/ActionForm";
 import { Card, Field, PageHeader, inputCls } from "@/components/ui";
-import { addMember, changeRole, removeMember } from "./actions";
+import { addMember, changeRole, removeMember, resetMemberPassword } from "./actions";
+import { btnSecondaryCls } from "@/components/ui";
 
 const ROLE_HELP: Record<string, string> = {
   OWNER: "Everything, including owners and billing",
@@ -50,10 +51,15 @@ export default async function UsersPage() {
                   </td>
                   <td className="text-right">
                     {!locked && (
-                      <form action={removeMember}>
-                        <input type="hidden" name="membershipId" value={m.id} />
-                        <button className="text-xs text-red-700 hover:underline">Remove</button>
-                      </form>
+                      <div className="flex flex-col items-end gap-1">
+                        <ActionForm action={resetMemberPassword} submitLabel="Reset password" className="flex max-w-xs flex-col items-end gap-1 text-left" buttonClassName={`${btnSecondaryCls} px-2 py-1 text-xs`}>
+                          <input type="hidden" name="membershipId" value={m.id} />
+                        </ActionForm>
+                        <form action={removeMember}>
+                          <input type="hidden" name="membershipId" value={m.id} />
+                          <button className="text-xs text-red-700 hover:underline">Remove</button>
+                        </form>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -73,7 +79,7 @@ export default async function UsersPage() {
               {grantable.map((r) => <option key={r} value={r}>{r.toLowerCase()} — {ROLE_HELP[r]}</option>)}
             </select>
           </Field>
-          <Field label="Temporary password" hint="Only needed if they don't have an account yet">
+          <Field label="Temporary password" hint="Only needed if they don't have an account yet. They'll be asked to change it.">
             <input name="password" className={inputCls} />
           </Field>
         </ActionForm>

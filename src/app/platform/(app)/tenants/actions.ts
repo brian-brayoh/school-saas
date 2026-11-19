@@ -10,6 +10,7 @@ import { normalizeKePhone } from "@/lib/phone";
 import { DEFAULT_CLASSES, DEFAULT_STREAM } from "@/lib/defaults";
 import { audit } from "@/lib/audit";
 import { applyProfile } from "@/lib/institution-profile";
+import { generateTempPassword, setPassword } from "@/lib/passwords";
 import type { FormState } from "@/components/ActionForm";
 
 export type CreateTenantState = FormState;
@@ -63,7 +64,7 @@ export async function createTenant(_prev: CreateTenantState, formData: FormData)
     const owner =
       existingUser ??
       (await tx.user.create({
-        data: { name: d.ownerName, email, phone, passwordHash: await bcrypt.hash(d.ownerPassword!, 10) },
+        data: { name: d.ownerName, email, phone, passwordHash: await bcrypt.hash(d.ownerPassword!, 10), mustChangePassword: true },
       }));
     await tx.membership.create({ data: { tenantId: t.id, userId: owner.id, role: "OWNER" } });
 
@@ -116,4 +117,23 @@ export async function savePlatformProfile(_p: FormState, formData: FormData): Pr
   if (error) return { error };
   revalidatePath("/tenants");
   return { ok: "Saved." };
+}
+
+/** Platform admin resets a school owner's or admin's password (e.g. a locked-out owner). */
+export async function resetSchoolUserPassword(_p: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requirePlatformAdmin();
+  const membershipId = String(formData.get("membershipId") ?? "");
+  try {
+    const out = await withSystem(async (tx) => {
+      const m = await tx.membership.findUniqueOrThrow({ where: { id: membershipId }, include: { user: true } });
+      if (m.user.isPlatformAdmin) throw new Error("Reset platform admins from their own account");
+      const temp = generateTempPassword();
+      await setPassword(tx, m.userId, temp, { mustChange: true });
+      await audit(tx, { tenantId: m.tenantId, actorUserId: admin.id, action: "user.password.reset", entity: "User", entityId: m.userId });
+      return { name: m.user.name, temp };
+    });
+    return { ok: `Temporary password for ${out.name}: ${out.temp}  Share it privately. They must choose their own at next sign-in.` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
 }

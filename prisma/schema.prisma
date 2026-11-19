@@ -180,6 +180,8 @@ model User {
   email           String?  @unique
   passwordHash    String
   isPlatformAdmin Boolean  @default(false)
+  mustChangePassword Boolean @default(false) // set for temporary passwords; forces a change at next sign-in
+  sessionVersion  Int      @default(0) // bumped on password change/reset: signs out every other device
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
